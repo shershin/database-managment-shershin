@@ -185,7 +185,14 @@ INSERT INTO Orders( ordno, mon, cid, aid, pid, qty, dollars )
 -- SQL statements for displaying example data into the CAP2 database
 -- Connect to your Postgres server and set the active database to CAP2.  Then . . .
 
+select *
+from customers;
 
+select *
+from products;
+
+select *
+from agents;
 
 select *
 from orders;
