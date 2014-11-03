@@ -17,7 +17,7 @@ where c.city = p.city and p.city in
 	(select city
 	from products
 	group by (city)
-	order by count(city) asc
+	order by count(city) desc
 	limit 2);
 
 --three--
@@ -32,12 +32,12 @@ order by pid asc;
 select c.name, o.pid, o.dollars
 from customers c, orders o
 where c.cid = o.cid
-order by o.dollars asc; 
+order by o.dollars asc;
 
 --five--
 select c.name, coalesce(sum(o.qty),0) as "Boom Total Ordered"
 from customers c
-inner join orders o 
+inner join orders o
 	on c.cid = o.cid
 group by c.name
 order by c.name asc;
@@ -51,7 +51,7 @@ order by c.name asc;
 --seven--
 select c.name, o.ordno, p.pid, o.qty, p.priceUSD, c.discount, o.dollars
 from customers c, orders o, products p
-where c.cid = o.cid and o.pid = p.pid and 
-	(o.qty * p.priceUSD) - 
+where c.cid = o.cid and o.pid = p.pid and
+	(o.qty * p.priceUSD) -
 	(((o.qty * p.priceUSD) * c.discount)/ 100)!= o.dollars
 order by o.ordno asc;
