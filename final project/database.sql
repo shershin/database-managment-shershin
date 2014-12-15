@@ -4,11 +4,10 @@
 
 --children--
 DROP TABLE IF EXISTS zombie;
-DROP TABLE IF EXISTS career;
-DROP TABLE IF EXISTS passwords;
 DROP TABLE IF EXISTS player_admin;
 DROP TABLE IF EXISTS signed_up;
-DROP TABLE IF EXISTS killed;
+DROP TABLE IF EXISTS hunting_zombies;
+drop table if exists hunting_foxes;
 
 --parent--
 DROP TABLE IF EXISTS people;
@@ -27,6 +26,10 @@ CREATE TABLE people(
 	code_name text UNIQUE,
 	email text UNIQUE,
 	phone_num bigint UNIQUE,
+	pass text,
+	num_of_zombie_kills int,
+	num_of_fox_kills int,
+	num_of_deaths int,
 	primary key(pid));
 
 --creation of game--
@@ -36,24 +39,26 @@ CREATE TABLE game(
 	end_date TIMESTAMP,
 	primary key(gid));
 
---creation of passwords--
-CREATE TABLE passwords(
-	pid SERIAL not null references people(pid),
-	pass text,
-	primary key(pid));
-
 --creation of admin--
 CREATE TABLE player_admin(
 	pid SERIAL not null references people(pid),
 	primary key(pid));
 
---creation of killed--
-CREATE TABLE killed(
-	preditor SERIAL not null references people(pid),
+--list of kills that foxes got--
+CREATE TABLE hunting_zombies(
+	predator SERIAL not null references people(pid),
 	prey SERIAL not null references people(pid),
 	gid SERIAL not null references game(gid),
 	location area,
-	primary key(preditor, prey, gid));
+	primary key(predator, prey, gid));
+
+--list of kills that zombies got--
+CREATE TABLE hunting_foxes(
+	predator SERIAL not null references people(pid),
+	prey SERIAL not null references people(pid),
+	gid SERIAL not null references game(gid),
+	location area,
+	primary key(predator, prey, gid));
 
 --creation of signed_up--
 CREATE TABLE signed_up(
@@ -61,13 +66,6 @@ CREATE TABLE signed_up(
 	gid SERIAL not null references game(gid),
 	primary key(pid, gid));
 
---creation of career--
-CREATE TABLE career(
-	pid SERIAL not null references people(pid),
-	zombie_kills int,
-	fox_kills int,
-	deaths int,
-	primary key(pid));
 --creation of zombies--
 CREATE TABLE zombie(
 	pid serial not null references people(pid),
@@ -106,39 +104,38 @@ CREATE OR REPLACE FUNCTION signed_up_to_battle(gid INTEGER, OUT fname text,
 		CREATE OR REPLACE FUNCTION update_zombie_kill(pid integer)returns void AS $$
 
 		BEGIN
-		update career
-			set zombie_kills = zombie_kills + 1
-			where pid = $1;
+		update people p
+			set num_of_zombie_kills = num_of_zombie_kills + 1
+			where p.pid = $1;
 			END;
 			$$ LANGUAGE plpgsql;
 			--updating human kills--
 			CREATE OR REPLACE FUNCTION update_fox_kill(pid integer)returns void AS $$
 
 			BEGIN
-			update career
-				set fox_kills = fox_kills + 1
-				where pid = $1;
+			update people p
+				set num_of_fox_kills = num_of_fox_kills + 1
+				where p.pid = $1;
 				END;
 				$$ LANGUAGE plpgsql;
 				--death update--
 				CREATE OR REPLACE FUNCTION update_deaths(pid integer)returns void AS $$
 
 				BEGIN
-				update career
-					set deaths = deaths + 1
-					where pid = $1;
+				update people p
+					set num_of_deaths = num_of_deaths + 1
+					where p.pid = $1;
 					END;
 					$$ LANGUAGE plpgsql;
 					--showing career of given player--
 					create or replace function show_career(pid integer, out code_name text,
-						out zombie_kills integer,
-						out fox_kills integer,
-						out deaths integer) returns setof record as $$
+						out num_of_zombie_kills integer,
+						out num_of_fox_kills integer,
+						out num_of_deaths integer) returns setof record as $$
 						begin
-						return QUERY select p.code_name, c.zombie_kills, c.fox_kills, c.deaths
-						from people p, career c
-						where p.pid = c.pid and
-						c.pid = $1;
+						return QUERY select code_name, num_of_zombie_kills, num_of_fox_kills, num_of_deaths
+						from people 
+						where pid = $1;
 						end;
 						$$ language plpgsql;
 --triggers--
@@ -166,12 +163,11 @@ create function check_people() returns trigger as $check_people$
 			create function admin_login_check() returns trigger as $admin_login_check$
 				begin
 				if
-				exists(select p.code_name, ps.pass
-					from people p, passwords ps, player_admin pa
-					where p.pid = ps.pid and
-					p.pid = pa.pid and
+				exists(select p.code_name, p.pass
+					from people p, player_admin pa
+					where p.pid = pa.pid and
 					p.code_name = NEW.code_name and
-					ps.pass = NEW.pass)
+					p.pass = NEW.pass)
 					then
 					return NEW;
 					end if;
@@ -182,40 +178,68 @@ create function check_people() returns trigger as $check_people$
 					create function login_check() returns trigger as $login_check$
 						begin
 						if
-						exists(select p.code_name, ps.pass
+						exists(select p.code_name, p.pass
 							from people p, passwords ps
-							where p.pid = ps.pid and
-							p.code_name = NEW.code_name and
-							ps.pass = NEW.pass)
+							where p.code_name = NEW.code_name and
+							p.pass = NEW.pass)
 							then
 							return NEW;
 							end if;
 							return exception 'Sorry, you are not in the database. Please sign up for our amazing app';
 							end;
 							$login_check$ language plpgsql;
+
+
 --views--
+--killer of zombies--
+create or replace view zombie_killer as
+select distinct g.gid, p.code_name, p.num_of_zombie_kills
+from people p, hunting_zombies hz, game g, zombie z, signed_up s
+where p.pid = s.pid and
+      g.gid = s.gid and
+      s.pid = hz.predator and
+      s.gid = hz.gid
+order by p.num_of_zombie_kills DESC;
+
+--killers of foxs--
+create or replace view fox_killer as
+select distinct g.gid, p.code_name, p.num_of_fox_kills
+from people p, hunting_foxes hf, game g, zombie z, signed_up s
+where p.pid = s.pid and
+      g.gid = s.gid and
+      s.pid = hf.predator and
+      s.gid = hf.gid
+order by p.num_of_fox_kills DESC;
 --amount of zombie wins--
-CREATE VIEW amount_of_zombie_wins as
+CREATE or replace VIEW amount_of_zombie_wins as
 select count(z.pid)
 from zombie z, signed_up s
 where z.pid > s.pid and z.gid = s.gid
 group by z.gid;
 --amount of fox wins--
-CREATE VIEW amount_of_fox_wins as
+CREATE or replace VIEW amount_of_fox_wins as
 select count(s.pid)
 from signed_up s, zombie z
 where s.pid > z.pid and s.gid = z.gid
 group by s.gid;
---listing all the prediors--
-CREATE VIEW preditor as
-select distinct p.pid, p.code_name, c.zombie_kills, c.fox_kills
-from people p, killed k, signed_up s, career c
-where p.pid = s.pid and s.pid = k.preditor and c.pid = p.pid;
---listing all the preys--
-CREATE VIEW prey as
-select distinct p.code_name, p.pid, c.deaths
-from people p, killed k, signed_up s, career c
-where p.pid = s.pid and s.pid = k.prey and c.pid = p.pid;
+--queries--
+--listing who killed the most--
+ select max(num_of_zombie_kills) + max(num_of_fox_kills) as Kills, code_name
+ from people
+ group by code_name
+ order by Kills DESC;
+
+--admin stats--
+select pa.pid, p.code_name, p.num_of_zombie_kills as zombie_kills, p.num_of_fox_kills as fox_kills, p.num_of_deaths as deaths, ((p.num_of_zombie_kills + p.num_of_fox_kills)- p.num_of_deaths) as Kill2Death_ratio 
+from player_admin pa, people p
+where p.pid = pa.pid;
+
+--stats for the players--
+select pid, code_name, num_of_zombie_kills as zombie_kills, num_of_fox_kills as fox_kills, num_of_deaths as deaths, ((num_of_zombie_kills + num_of_fox_kills)- num_of_deaths) as Kill2Death_ratio 
+from people
+order by pid;
+
+
 --security--
 CREATE ROLE app
 GRANT SELECT, INSERT, UPDATE
@@ -228,30 +252,59 @@ ON ALL TABLES IN SCHEMA PUBLIC
 TO admin
 --small amount of data to be inserted--
 --inserting data--
-INSERT INTO people(fname, lname, grade_year, code_name, email, phone_num)
-VALUES('mike', 'shershin', 'junior', 'beg2thefox', 'michael.shershin1@marist.edu', '8455184571'),
-('ed', 'sutka', 'sophmore', 'new noble', 'edward.sutka1@marist.edu', '8451234567'),
-('cameron', 'meyer', 'sophmore', 'bunnie king', 'cameron.meyer1@marist.edu', '1234561234');
-
---password--
-INSERT INTO passwords(pid, pass)
-VALUES('1', 'kitten'),
-('2', 'chowder'),
-('3', 'hat');
+INSERT INTO people(fname, lname, grade_year, code_name, email, phone_num, pass, num_of_zombie_kills, num_of_fox_kills, num_of_deaths)
+VALUES('mike', 'shershin', 'junior', 'beg2thefox', 'michael.shershin1@marist.edu', '8455184571', 'kitten', 0, 0, 0),
+('ed', 'sutka', 'sophmore', 'new noble', 'edward.sutka1@marist.edu', '8451234567', 'chowder', 0, 0, 0),
+('cameron', 'meyer', 'sophmore', 'bunnie king', 'cameron.meyer1@marist.edu', '1234561234', 'freehat', 0, 0, 0),
+('bill', 'morison', 'senior', 'ronnyd', 'bill.morison@marist.edu', '1334561234', 'theman', 0, 0, 0),
+('victoria', 'garcia', 'freshmen', 'neo', 'victoria@marist.edu', '1234561230', 'tindle', 0, 0, 0),
+('rosemary', 'b', 'sophmore', 'danielcraig<3', 'daniel.craig@marist.edu', '999999999', 'bondforlife', 0, 0, 0);
 --admin--
 INSERT INTO player_admin(pid)
 values('1');
 --killed--
-INSERT INTO killed(preditor, prey, gid, location)
+INSERT INTO hunting_zombies(predator, prey, gid, location)
 values('2', '1', '1', 'Hancock Center');
+
+insert into hunting_foxes(predator, prey, gid, location)
+values('1', '5', '1', 'Cannacino Libary');
 --game_set--
 INSERT INTO game(start_date, end_date)
-values(NOW(), '2015-1-01 00:00:00');
+values(NOW(), '2015-1-01 00:00:00'),
+	(NOW(), '2015-1-01 00:00:00'),
+	(NOW(), '2015-1-01 00:00:00'),
+	(NOW(), '2015-1-01 00:00:00');
 --signed_up--
 INSERT INTO signed_up(pid, gid)
 values('1', '1'),
 ('2', '1'),
-('3', '1');
+('3', '1'),
+('3', '2'),
+('3', '2'),
+('3', '2'),
+('3', '2'),
+('3', '3'),
+('3', '2'),
+('4', '2'),
+('5', '2'),
+('6', '2'),
+('1', '3'),
+('2', '3'),
+('3', '3'),
+('6', '3'),
+('1', '4'),
+('2', '4'),
+('3', '4'),
+('4', '4'),
+('5', '4'),
+('6', '4');
 --zombie time--
 INSERT INTO zombie(pid, gid, time_turned)
-VALUES(1, 1, NOW());
+VALUES  (1, 1, NOW()),
+	(1, 3, NOW()),
+	(6, 3, NOW()),
+	(3, 3, NOW()),
+	(4, 2, NOW()),
+	(3, 2, NOW()),
+	(5, 4, NOW()),
+	(6, 4, NOW());
